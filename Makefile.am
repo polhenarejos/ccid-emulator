@@ -1,9 +1,9 @@
 ACLOCAL_AMFLAGS = -I m4
 SUBDIRS = src m4 patches
 
-DISTCLEANFILES = Doxyfile libpace.pc
+DISTCLEANFILES = Doxyfile
 
-EXTRA_DIST = README.dox libpace.pc.in Doxyfile.in apdus
+EXTRA_DIST = README.dox Doxyfile.in apdus
 
 do_subst = sed \
 	   -e 's,[@]PACKAGE_NAME[@],$(PACKAGE_NAME),g' \
@@ -25,11 +25,4 @@ doc :
 	$(DOXYGEN) Doxyfile
 
 .PHONY: doc
-endif
-
-if WITH_PACE
-pkgconfigdir = $(libdir)/pkgconfig
-pkgconfig_DATA = libpace.pc
-libpace.pc :
-	$(do_subst) < $(srcdir)/libpace.pc.in > libpace.pc
 endif
