@@ -1,17 +1,13 @@
 .. highlight:: sh
 
-.. _OpenSC: http://www.opensc-project.org/opensc
-.. _GadgetFS: http://www.linux-usb.org/gadget/
-.. _libccid: http://pcsclite.alioth.debian.org/ccid.html
-
 .. |npa| replace:: :ref:`npa`
 .. |PACE| replace:: :abbr:`PACE (Password Authenticated Connection Establishment)`
 
 .. _ccid-emulator:
 
-********************************************************************************
+#################
 USB CCID Emulator
-********************************************************************************
+#################
 
 :Author:
     Frank Morgner <morgner@informatik.hu-berlin.de>
@@ -46,17 +42,15 @@ USB CCID                           PC/SC
 ================================== ============================================================
 
 The USB CCID Emulator is implemented using GadgetFS_. Some fragments of the source
-code are based on the GadgetFS example and on the source code of the OpenSC_
+code are based on the GadgetFS example and on the source code of the OpenSC
 tools.
 
 
-.. [#f1] Note that the heavily outdated `Windows USB CCID driver <http://msdn.microsoft.com/en-us/windows/hardware/gg487509>`_ does not support secure PIN entry or PIN modification. USB CCID Emulator comes with a patch for libccid_ to support |PACE|, because it is not yet standardised in USB CCID. However, the traditional commands can be used without restriction.
+
+.. include:: download.txt
 
 
-.. include:: download.rst
-
-
-.. include:: autotools.rst
+.. include:: autotools.txt
 
 Running the USB CCID Emulator has the following dependencies:
 
@@ -69,13 +63,13 @@ needs a usable PC/SC middleware with USB CCID driver. This is the case for most
 modern Windows and Unix-like systems by default.
 
 
------------------
+=================
 Hints on GadgetFS
------------------
+=================
 
 To create a USB Gadget in both USB host and USB client mode, you need to load
 the kernel module :program:`gadgetfs`. A guide focused on Debian based systems
-to run and compile GadgetFS_, you can find `here
+to run and compile GadgetFS, you can find in the `OpenMoko Wiki
 <http://wiki.openmoko.org/wiki/Building_Gadget_USB_Module>`_.
 
 On OpenMoko it is likely that you need to `patch your kernel
@@ -88,14 +82,14 @@ loading the module, you maybe want to check out `this patch
 <http://comments.gmane.org/gmane.linux.usb.general/47440>`_.
 
 
----------------
+===============
 Hints on OpenSC
----------------
+===============
 
 Without the |npa| the USB CCID Emulator links against OpenSC, which is discouraged
 and hindered since OpenSC version >= 0.12. You need the OpenSC components to be
 installed (especially :file:`libopensc.so`). Here is an example of how to get
-the standard installation of OpenSC_ without |PACE|::
+the standard installation of OpenSC without |PACE|::
 
     PREFIX=/tmp/install
     OPENSC=opensc
@@ -112,12 +106,12 @@ configure the USB CCID Emulator to use it::
     ./configure OPENSC_LIBS="-L$PREFIX/lib -lopensc"
 
 
-=====
+*****
 Usage
-=====
+*****
 
 The USB CCID Emulator has various command line options to customize the appearance
-on the USB host. In order to run the USB CCID Emulator GadgetFS_ must be loaded
+on the USB host. In order to run the USB CCID Emulator GadgetFS must be loaded
 and mounted.  The USB CCID Emulator is compatible with the unix driver libccid_
 and the `Windows USB CCID driver
 <http://msdn.microsoft.com/en-us/windows/hardware/gg487509>`_. To initialize
@@ -126,4 +120,17 @@ and the `Windows USB CCID driver
 .. program-output:: ccid-emulator --help
 
 
-.. include:: questions.rst
+.. include:: questions.txt
+
+
+********************
+Notes and References
+********************
+
+.. target-notes::
+
+.. [#f1] Note that the heavily outdated `Windows USB CCID driver`_ does not support secure PIN entry or PIN modification. USB CCID Emulator comes with a patch for libccid_ to support |PACE|, because it is not yet standardised in USB CCID. However, the traditional commands can be used without restriction.
+.. _`Windows USB CCID driver`: http://msdn.microsoft.com/en-us/windows/hardware/gg487509
+.. _`OpenSC`: http://www.opensc-project.org/opensc
+.. _`GadgetFS`: http://www.linux-usb.org/gadget/
+.. _`libccid`: http://pcsclite.alioth.debian.org/ccid.html

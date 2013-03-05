@@ -1,8 +1,8 @@
 .. highlight:: sh
 
-============
+************
 Installation
-============
+************
 
 The USB CCID Emulator uses the GNU Build System to compile and install. If you are
 unfamiliar with it, please have a look at :file:`INSTALL`. If you have a look
