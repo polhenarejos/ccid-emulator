@@ -780,28 +780,33 @@ perform_PC_to_RDR_XfrBlock(const u8 *in, size_t inlen, __u8** out, size_t *outle
 	}
 
 #ifdef USB_PROXY
-    //bin_log(ctx, SC_LOG_DEBUG_VERBOSE, "Proxy input", abDataIn, apdulen);
-    egg_buffer_encode_uint32(buf, apdulen);
-    call_write(buf, sizeof(buf));
-    call_write((void *)abDataIn, apdulen);
-		sc_result = call_read(buf, 4);
-	  if (sc_result != SC_SUCCESS)
-		  goto cleanup;
-
-	  abDataOutLen = egg_buffer_decode_uint32(buf);
-	  if (0 != abDataOutLen) {
-        abDataOut = realloc(abDataOut, abDataOutLen);
-        if (!abDataOut) {
-		        printf("couldn't allocate %u byte response area: out of memory", abDataOutLen);
-            sc_result = SC_ERROR_OUT_OF_MEMORY;
-            goto cleanup;
-        }
+    bin_log(ctx, SC_LOG_DEBUG_VERBOSE, "Proxy input", abDataIn, apdulen);
+    if (*abDataIn == 0x0 && *(abDataIn+1) == 0x0) {
+      egg_buffer_encode_uint32(buf, apdulen);
+      call_write(buf, sizeof(buf));
+      call_write((void *)abDataIn, apdulen);
+  		sc_result = call_read(buf, 4);
+  	  if (sc_result != SC_SUCCESS)
+  		  goto cleanup;
+  
+  	  abDataOutLen = egg_buffer_decode_uint32(buf);
+  	  if (0 != abDataOutLen) {
+          abDataOut = realloc(abDataOut, abDataOutLen);
+          if (!abDataOut) {
+  		        printf("couldn't allocate %u byte response area: out of memory", abDataOutLen);
+              sc_result = SC_ERROR_OUT_OF_MEMORY;
+              goto cleanup;
+          }
+      }
+  
+  	  sc_result = call_read(abDataOut, abDataOutLen);
+  	  bin_log(ctx, SC_LOG_DEBUG_VERBOSE, "Proxy output", abDataOut, abDataOutLen);
+  	  if (sc_result != SC_SUCCESS)
+  		  goto cleanup;
     }
-
-	  sc_result = call_read(abDataOut, abDataOutLen);
-	  //bin_log(ctx, SC_LOG_DEBUG_VERBOSE, "Proxy output", abDataOut, abDataOutLen);
-	  if (sc_result != SC_SUCCESS)
-		  goto cleanup;
+    else {
+      
+    }
 
 #else
     sc_result = sc_bytes2apdu(ctx, abDataIn, apdulen, &apdu);
