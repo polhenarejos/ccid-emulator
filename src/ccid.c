@@ -259,7 +259,8 @@ detect_card_presence(void)
 {
     int sc_result;
 
-    sc_result = sc_detect_card_presence(reader);
+    //sc_result = sc_detect_card_presence(reader);
+    sc_result = SC_SUCCESS;
 
     if (sc_result == 0
             && card) {
@@ -430,12 +431,12 @@ static __u8 get_bStatus(int sc_result)
     int flags;
     __u8 bstatus = 0;
 
-	if (skipfirst > 10)
-		flags = detect_card_presence();
-	else {
-		skipfirst += 1;
-		flags = SC_SUCCESS;
-	}
+	//if (skipfirst > 10)
+	//	flags = detect_card_presence();
+	//else {
+	//	skipfirst += 1;
+		flags = SC_SUCCESS | SC_READER_CARD_PRESENT;
+	//}
 
     if (flags >= 0) {
         if (sc_result < 0) {
@@ -588,17 +589,20 @@ perform_PC_to_RDR_IccPowerOn(const __u8 *in, size_t inlen, __u8 **out, size_t *o
         sc_debug(ctx, SC_LOG_DEBUG_NORMAL, "Card is already powered on.");
         sc_result = SC_SUCCESS;
     } else {
-        sc_sm_stop(card);
+        //sc_sm_stop(card);
         /* avoid OpenSC's internal card driver magic. The default driver
          * doesn't send any additional commands */
-        sc_set_card_driver(ctx, "default");
-        sc_result = sc_connect_card(reader, &card);
-        card->caps |= SC_CARD_CAP_APDU_EXT;
+        //sc_set_card_driver(ctx, "default");
+        //sc_result = sc_connect_card(reader, &card);
+        sc_result = SC_SUCCESS;
+        //card->caps |= SC_CARD_CAP_APDU_EXT;
     }
-
+    
     if (sc_result >= 0) {
+        unsigned char atr[] = {0x3b,0x89,0x00,0x56,0x43,0x41,0x52,0x44,0x5f,0x4e,0x53,0x53};
+        size_t atr_len = sizeof(atr)/sizeof(unsigned char);
         return get_RDR_to_PC_SlotStatus(request->bSeq,
-                sc_result, out, outlen, card->atr.value, card->atr.len);
+                sc_result, out, outlen, atr, atr_len);
     } else {
         sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "Returning default status package.");
         return get_RDR_to_PC_SlotStatus(request->bSeq,
