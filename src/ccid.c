@@ -38,6 +38,98 @@ static sc_context_t *ctx = NULL;
 static sc_card_t *card = NULL;
 static sc_reader_t *reader = NULL;
 
+#define USB_PROXY 1
+
+#ifdef USB_PROXY
+
+static uint64_t pkcs11_app_id = 0;
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <fcntl.h>
+#include <assert.h>
+
+int proxy_fd = 0;
+
+void egg_buffer_encode_uint32(unsigned char *buf, uint32_t val)
+{
+	buf[0] = (val >> 24) & 0xff;
+	buf[1] = (val >> 16) & 0xff;
+	buf[2] = (val >> 8) & 0xff;
+	buf[3] = (val >> 0) & 0xff;
+}
+
+uint32_t egg_buffer_decode_uint32(unsigned char *ptr)
+{
+	uint32_t val = ptr[0] << 24 | ptr[1] << 16 | ptr[2] << 8 | ptr[3];
+	return val;
+}
+
+static int call_read(unsigned char *data, size_t len)
+{
+	int r;
+	assert(data);
+	assert(len > 0);
+
+	while (len > 0) {
+
+		if (proxy_fd == -1) {
+			printf(("couldn't receive data: session socket has been closed"));
+			return SC_ERROR_TRANSMIT_FAILED;
+		}
+
+    r = recv(proxy_fd, (void *)data, len, 0);
+
+		if (r == 0) {
+			printf(("couldn't receive data: daemon closed connection"));
+			return SC_ERROR_TRANSMIT_FAILED;
+		} else if (r == -1) {
+			if (errno != EAGAIN && errno != EINTR) {
+				printf(("couldn't receive data: %s", strerror(errno)));
+				return SC_ERROR_TRANSMIT_FAILED;
+			}
+		} else {
+			data += r;
+			len -= r;
+		}
+	}
+
+	return SC_SUCCESS;
+}
+static int call_write(unsigned char *data, size_t len)
+{
+	int r;
+
+	assert(data);
+	assert(len > 0);
+
+	while (len > 0) {
+		if (proxy_fd == -1) {
+			printf(("couldn't send data: socket has been closed"));
+			return SC_ERROR_TRANSMIT_FAILED;
+		}
+
+    r = send(proxy_fd, (void *)data, len, 0);
+
+		if (r == -1) {
+			if (errno == EPIPE) {
+				printf(("couldn't send data: daemon closed connection"));
+				return SC_ERROR_TRANSMIT_FAILED;
+			} else if (errno != EAGAIN && errno != EINTR) {
+				printf(("couldn't send data: %s",strerror(errno)));
+				return SC_ERROR_TRANSMIT_FAILED;
+			}
+		} else {
+			data += r;
+			len -= r;
+		}
+	}
+
+	return SC_SUCCESS;
+}
+
+#endif
+
 static int
 perform_pseudo_apdu_EstablishPACEChannel(sc_apdu_t *apdu)
 {
@@ -155,12 +247,12 @@ ccid_desc = {
 };
 
 #define debug_sc_result(sc_result) \
-do { \
+{ \
     if (sc_result < 0) \
-        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "%s", sc_strerror(sc_result)); \
+        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, sc_strerror(sc_result)); \
     else \
-        sc_debug(ctx, SC_LOG_DEBUG_NORMAL,  "%s", sc_strerror(sc_result)); \
-} while (0)
+        sc_debug(ctx, SC_LOG_DEBUG_NORMAL, sc_strerror(sc_result)); \
+}
 
 static int
 detect_card_presence(void)
@@ -196,6 +288,11 @@ detect_card_presence(void)
 int ccid_initialize(int reader_id, int verbose)
 {
     int i;
+#ifdef USB_PROXY
+    int r;
+    pid_t pid;
+    unsigned char *pkcs11_socket_path = "/tmp/socket.pkcs11";
+#endif
 
     i = initialize(reader_id, verbose, &ctx, &reader);
     if (i < 0)
@@ -203,7 +300,35 @@ int ccid_initialize(int reader_id, int verbose)
     if (verbose > 0) {
         sc_ctx_log_to_file(ctx, "stderr");
     }
-
+    
+#ifdef USB_PROXY
+	  struct sockaddr_un addr;
+	  memset(&addr, 0, sizeof(addr));
+    
+    addr.sun_family = AF_UNIX;
+    
+		strncpy(addr.sun_path, pkcs11_socket_path,sizeof(addr.sun_path));
+			
+		proxy_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (proxy_fd < 0) {
+			printf(("couldn't open socket: %s", strerror(errno)));
+			return SC_ERROR_INVALID_ARGUMENTS;
+		}
+		if (fcntl(proxy_fd, F_SETFD, 1) == -1) {
+  		close(proxy_fd);
+  		printf(("couldn't secure socket: %s", strerror(errno)));
+  		return SC_ERROR_INVALID_ARGUMENTS;
+  	}
+  	if (connect(proxy_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+  		close(proxy_fd);
+  		printf(("couldn't connect to: %s: %s", pkcs11_socket_path, strerror(errno)));
+  		return SC_ERROR_INVALID_ARGUMENTS;
+  	}
+  	pid = getpid();
+  	srand(time(NULL) ^ pid);
+	  pkcs11_app_id = (uint64_t) rand() << 32 | rand();
+	  call_write((void *)&pkcs11_app_id, sizeof(pkcs11_app_id));
+#endif 
     return SC_SUCCESS;
 }
 
@@ -216,6 +341,12 @@ void ccid_shutdown(void)
     }
     if (ctx)
         sc_release_context(ctx);
+        
+#ifdef USB_PROXY
+    if (proxy_fd != -1) {
+      close(proxy_fd);
+    }
+#endif
 }
 
 static int get_rapdu(sc_apdu_t *apdu, __u8 **buf, size_t *resplen)
@@ -352,7 +483,7 @@ get_RDR_to_PC_SlotStatus(__u8 bSeq, int sc_result, __u8 **outbuf, size_t *outlen
     if (!outbuf)
         return SC_ERROR_INVALID_ARGUMENTS;
     if (abProtocolDataStructureLen > 0xffff) {
-        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "abProtocolDataStructure %zu bytes too long",
+        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "abProtocolDataStructure %u bytes too long",
                 abProtocolDataStructureLen-0xffff);
         return SC_ERROR_INVALID_DATA;
     }
@@ -384,7 +515,7 @@ get_RDR_to_PC_DataBlock(__u8 bSeq, int sc_result, __u8 **outbuf,
     if (!outbuf)
         return SC_ERROR_INVALID_ARGUMENTS;
     if (abDataLen > 0xffff) {
-        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "abProtocolDataStructure %zu bytes too long",
+        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "abProtocolDataStructure %u bytes too long",
                 abDataLen-0xffff);
         return SC_ERROR_INVALID_DATA;
     }
@@ -613,9 +744,13 @@ err:
     return SC_SUCCESS;
 }
 
+
 static int
 perform_PC_to_RDR_XfrBlock(const u8 *in, size_t inlen, __u8** out, size_t *outlen)
 {
+#ifdef USB_PROXY
+    unsigned char buf[4];
+#endif 
     const PC_to_RDR_XfrBlock_t *request = (PC_to_RDR_XfrBlock_t *) in;
     const __u8 *abDataIn = in + sizeof *request;
     int sc_result;
@@ -640,6 +775,31 @@ perform_PC_to_RDR_XfrBlock(const u8 *in, size_t inlen, __u8** out, size_t *outle
         SC_FUNC_RETURN(ctx, SC_LOG_DEBUG_VERBOSE, SC_ERROR_INVALID_DATA);
 	}
 
+#ifdef USB_PROXY
+    //bin_log(ctx, SC_LOG_DEBUG_VERBOSE, "Proxy input", abDataIn, apdulen);
+    egg_buffer_encode_uint32(buf, apdulen);
+    call_write(buf, sizeof(buf));
+    call_write((void *)abDataIn, apdulen);
+		sc_result = call_read(buf, 4);
+	  if (sc_result != SC_SUCCESS)
+		  goto cleanup;
+
+	  abDataOutLen = egg_buffer_decode_uint32(buf);
+	  if (0 != abDataOutLen) {
+        abDataOut = realloc(abDataOut, abDataOutLen);
+        if (!abDataOut) {
+		        printf("couldn't allocate %u byte response area: out of memory", abDataOutLen);
+            sc_result = SC_ERROR_OUT_OF_MEMORY;
+            goto cleanup;
+        }
+    }
+
+	  sc_result = call_read(abDataOut, abDataOutLen);
+	  //bin_log(ctx, SC_LOG_DEBUG_VERBOSE, "Proxy output", abDataOut, abDataOutLen);
+	  if (sc_result != SC_SUCCESS)
+		  goto cleanup;
+
+#else
     sc_result = sc_bytes2apdu(ctx, abDataIn, apdulen, &apdu);
     if (sc_result >= 0) {
         /* don't magically get additional data in OpenSC */
@@ -649,12 +809,12 @@ perform_PC_to_RDR_XfrBlock(const u8 *in, size_t inlen, __u8** out, size_t *outle
     } else
         bin_log(ctx, SC_LOG_DEBUG_VERBOSE, "Invalid APDU", abDataIn,
                 __le32_to_cpu(request->dwLength));
-
+#endif
     sc_result = get_RDR_to_PC_DataBlock(request->bSeq, sc_result,
             out, outlen, abDataOut, abDataOutLen);
 
     free(abDataOut);
-
+    cleanup:
     return sc_result;
 }
 
@@ -1078,7 +1238,7 @@ perform_PC_to_RDR_Secure_EstablishPACEChannel(sc_card_t *card,
 
 
     if (pace_output.ef_cardaccess_length > 0xffff) {
-        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "EF.CardAcces %zu bytes too long",
+        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "EF.CardAcces %u bytes too long",
                 pace_output.ef_cardaccess_length-0xffff);
         sc_result = SC_ERROR_INVALID_DATA;
         goto err;
@@ -1095,7 +1255,7 @@ perform_PC_to_RDR_Secure_EstablishPACEChannel(sc_card_t *card,
 
 
     if (pace_output.recent_car_length > 0xff) {
-        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "Most recent CAR %zu bytes too long",
+        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "Most recent CAR %u bytes too long",
                 pace_output.recent_car_length-0xff);
         sc_result = SC_ERROR_INVALID_DATA;
         goto err;
@@ -1110,7 +1270,7 @@ perform_PC_to_RDR_Secure_EstablishPACEChannel(sc_card_t *card,
 
 
     if (pace_output.previous_car_length > 0xff) {
-        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "Previous CAR %zu bytes too long",
+        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "Previous CAR %u bytes too long",
                 pace_output.previous_car_length-0xff);
         sc_result = SC_ERROR_INVALID_DATA;
         goto err;
@@ -1125,7 +1285,7 @@ perform_PC_to_RDR_Secure_EstablishPACEChannel(sc_card_t *card,
 
 
     if (pace_output.id_icc_length > 0xffff) {
-        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "ID ICC %zu bytes too long",
+        sc_debug(ctx, SC_LOG_DEBUG_VERBOSE, "ID ICC %u bytes too long",
                 pace_output.id_icc_length-0xffff);
         sc_result = SC_ERROR_INVALID_DATA;
         goto err;
